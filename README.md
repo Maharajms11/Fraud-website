@@ -47,3 +47,21 @@ Then open: `http://localhost:8080`
 - Run this behind HTTPS in production.
 - Move from JSON file storage to a proper database before high traffic.
 - Add moderation workflow and abuse monitoring if opened broadly to the public.
+
+## Deploy On Render (Small Group Critique)
+
+This repo includes `render.yaml`, so Render can auto-configure the service.
+
+1. Push latest `main` to GitHub.
+2. In Render: `New +` -> `Blueprint`.
+3. Select repo: `Maharajms11/Fraud-website`.
+4. Render will detect `render.yaml`; click `Apply`.
+5. Wait for deploy and open the generated `https://...onrender.com` URL.
+
+Render settings used:
+- `Build Command`: `npm install`
+- `Start Command`: `npm start`
+- `Health Check`: `/health`
+- `HOST=0.0.0.0` (required for cloud runtime)
+
+Note: current storage is JSON file based and may reset on instance rebuild/restart. For reliable persistence, move to a managed database (SQLite on persistent disk, PostgreSQL, etc.).
