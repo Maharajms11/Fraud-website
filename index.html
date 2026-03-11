@@ -134,6 +134,35 @@
             </select>
           </label>
 
+          <label id="saps-case-wrap" hidden>
+            SAPS case number (optional, public)
+            <input
+              type="text"
+              name="sapsCaseNumber"
+              maxlength="80"
+              placeholder="e.g. CAS 123/03/2026"
+            />
+          </label>
+
+          <label>
+            Has this matter served in court?
+            <select name="hasServedInCourt" required>
+              <option value="">Choose</option>
+              <option>Yes</option>
+              <option>No</option>
+            </select>
+          </label>
+
+          <label id="court-case-wrap" hidden>
+            Court case number (public)
+            <input
+              type="text"
+              name="courtCaseNumber"
+              maxlength="80"
+              placeholder="e.g. CR 45/2026"
+            />
+          </label>
+
           <label class="full-width">
             Brief summary (no private account numbers or email addresses)
             <textarea
@@ -206,6 +235,8 @@
                 <th>Bank</th>
                 <th>Type</th>
                 <th>Province</th>
+                <th>SAPS</th>
+                <th>Court</th>
                 <th>Net loss</th>
                 <th>Summary</th>
               </tr>

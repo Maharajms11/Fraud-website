@@ -106,6 +106,18 @@ function sanitizeText(value, maxLength = 600) {
     .slice(0, maxLength);
 }
 
+function sanitizeCaseRef(value, maxLength = 80) {
+  return String(value || "")
+    .replace(/[<>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function isValidCaseRef(value) {
+  return /^[A-Za-z0-9][A-Za-z0-9/.\-\s]*$/.test(value);
+}
+
 function parseAmount(value) {
   const parsed = Number.parseFloat(String(value));
   if (!Number.isFinite(parsed) || parsed < 0) {
@@ -131,6 +143,9 @@ function validateReport(payload) {
   const province = String(payload.province || "").trim();
   const reportedToBank = String(payload.reportedToBank || "").trim();
   const reportedToSaps = String(payload.reportedToSaps || "").trim();
+  const hasServedInCourt = String(payload.hasServedInCourt || "").trim();
+  const sapsCaseNumberInput = sanitizeCaseRef(payload.sapsCaseNumber, 80);
+  const courtCaseNumberInput = sanitizeCaseRef(payload.courtCaseNumber, 80);
   const narrative = sanitizeText(payload.narrative, 600);
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(incidentDate)) {
@@ -154,8 +169,16 @@ function validateReport(payload) {
     return { error: "Province value is invalid." };
   }
 
-  if (!yesNo.has(reportedToBank) || !yesNo.has(reportedToSaps)) {
+  if (!yesNo.has(reportedToBank) || !yesNo.has(reportedToSaps) || !yesNo.has(hasServedInCourt)) {
     return { error: "Reporting status must be Yes or No." };
+  }
+
+  if (sapsCaseNumberInput && !isValidCaseRef(sapsCaseNumberInput)) {
+    return { error: "SAPS case number has invalid characters." };
+  }
+
+  if (courtCaseNumberInput && !isValidCaseRef(courtCaseNumberInput)) {
+    return { error: "Court case number has invalid characters." };
   }
 
   if (narrative.length < 10) {
@@ -183,6 +206,9 @@ function validateReport(payload) {
     return { error: "Amounts exceed allowed limit." };
   }
 
+  const sapsCaseNumber = reportedToSaps === "Yes" ? sapsCaseNumberInput : "";
+  const courtCaseNumber = hasServedInCourt === "Yes" ? courtCaseNumberInput : "";
+
   return {
     value: {
       id: randomUUID(),
@@ -194,6 +220,9 @@ function validateReport(payload) {
       amountRecovered,
       reportedToBank,
       reportedToSaps,
+      sapsCaseNumber,
+      hasServedInCourt,
+      courtCaseNumber,
       narrative,
       createdAt: new Date().toISOString(),
     },
@@ -366,6 +395,9 @@ function toCsv(reports) {
     "amountRecovered",
     "reportedToBank",
     "reportedToSaps",
+    "sapsCaseNumber",
+    "hasServedInCourt",
+    "courtCaseNumber",
     "narrative",
     "createdAt",
   ];

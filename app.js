@@ -12,6 +12,12 @@ const bankBreakdownEl = document.getElementById("bank-breakdown");
 const typeBreakdownEl = document.getElementById("type-breakdown");
 
 const downloadBtn = document.getElementById("download-btn");
+const reportedToSapsEl = form.elements.reportedToSaps;
+const sapsCaseWrapEl = document.getElementById("saps-case-wrap");
+const sapsCaseInputEl = form.elements.sapsCaseNumber;
+const hasServedInCourtEl = form.elements.hasServedInCourt;
+const courtCaseWrapEl = document.getElementById("court-case-wrap");
+const courtCaseInputEl = form.elements.courtCaseNumber;
 
 const currency = new Intl.NumberFormat("en-ZA", {
   style: "currency",
@@ -30,6 +36,27 @@ function makeCell(text) {
   return td;
 }
 
+function formatCaseField(status, caseNumber) {
+  if (status !== "Yes") {
+    return "No";
+  }
+  return caseNumber ? `Yes (${caseNumber})` : "Yes";
+}
+
+function toggleConditionalFields() {
+  const showSapsCase = reportedToSapsEl.value === "Yes";
+  sapsCaseWrapEl.hidden = !showSapsCase;
+  if (!showSapsCase) {
+    sapsCaseInputEl.value = "";
+  }
+
+  const showCourtCase = hasServedInCourtEl.value === "Yes";
+  courtCaseWrapEl.hidden = !showCourtCase;
+  if (!showCourtCase) {
+    courtCaseInputEl.value = "";
+  }
+}
+
 function renderStats(stats) {
   statReports.textContent = String(stats.totalReports || 0);
   statLost.textContent = currency.format(stats.totalLost || 0);
@@ -43,7 +70,7 @@ function renderTable(reports) {
   if (!reports.length) {
     const row = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 6;
+    td.colSpan = 8;
     td.textContent = "No reports yet. Add the first one above.";
     row.appendChild(td);
     tableEl.appendChild(row);
@@ -58,6 +85,8 @@ function renderTable(reports) {
     row.appendChild(makeCell(report.bank));
     row.appendChild(makeCell(report.fraudType));
     row.appendChild(makeCell(report.province));
+    row.appendChild(makeCell(formatCaseField(report.reportedToSaps, report.sapsCaseNumber)));
+    row.appendChild(makeCell(formatCaseField(report.hasServedInCourt, report.courtCaseNumber)));
     row.appendChild(makeCell(currency.format(net)));
     row.appendChild(makeCell(report.narrative));
 
@@ -157,6 +186,9 @@ function formDataToPayload(formData) {
     amountRecovered: Number.parseFloat(String(formData.get("amountRecovered") || "0")) || 0,
     reportedToBank: String(formData.get("reportedToBank") || ""),
     reportedToSaps: String(formData.get("reportedToSaps") || ""),
+    sapsCaseNumber: String(formData.get("sapsCaseNumber") || "").trim(),
+    hasServedInCourt: String(formData.get("hasServedInCourt") || ""),
+    courtCaseNumber: String(formData.get("courtCaseNumber") || "").trim(),
     narrative: String(formData.get("narrative") || ""),
   };
 }
@@ -196,6 +228,7 @@ form.addEventListener("submit", async (event) => {
     }
 
     form.reset();
+    toggleConditionalFields();
     setMessage("Report published to the public dashboard.");
     await loadDashboard();
   } catch (error) {
@@ -209,4 +242,8 @@ downloadBtn.addEventListener("click", () => {
   window.location.assign("/api/reports.csv");
 });
 
+reportedToSapsEl.addEventListener("change", toggleConditionalFields);
+hasServedInCourtEl.addEventListener("change", toggleConditionalFields);
+
+toggleConditionalFields();
 loadDashboard();
