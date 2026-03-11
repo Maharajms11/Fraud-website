@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fraud Watch SA</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="hero">
+        <p class="eyebrow">Community Fraud Registry</p>
+        <h1>Fraud Watch SA</h1>
+        <p>
+          Share your experience with South African bank fraud incidents. The goal
+          is to reveal patterns and give consumers visibility into real harm.
+        </p>
+      </header>
+
+      <section class="panel" aria-labelledby="report-title">
+        <h2 id="report-title">Submit Your Report</h2>
+        <form id="report-form" class="form-grid" novalidate>
+          <label>
+            Date of incident
+            <input type="date" name="incidentDate" required />
+          </label>
+
+          <label>
+            Bank
+            <select name="bank" required>
+              <option value="">Select a bank</option>
+              <option>ABSA</option>
+              <option>Capitec</option>
+              <option>FNB</option>
+              <option>Nedbank</option>
+              <option>Standard Bank</option>
+              <option>TymeBank</option>
+              <option>Discovery Bank</option>
+              <option>Investec</option>
+              <option>African Bank</option>
+              <option>Other</option>
+            </select>
+          </label>
+
+          <label>
+            Fraud type
+            <select name="fraudType" required>
+              <option value="">Select fraud type</option>
+              <option>Phishing</option>
+              <option>Vishing</option>
+              <option>SIM swap</option>
+              <option>Card cloning</option>
+              <option>ATM scam</option>
+              <option>App takeover</option>
+              <option>Online banking compromise</option>
+              <option>Investment scam</option>
+              <option>Unauthorized debit order</option>
+              <option>Other</option>
+            </select>
+          </label>
+
+          <label>
+            Province
+            <select name="province" required>
+              <option value="">Select province</option>
+              <option>Eastern Cape</option>
+              <option>Free State</option>
+              <option>Gauteng</option>
+              <option>KwaZulu-Natal</option>
+              <option>Limpopo</option>
+              <option>Mpumalanga</option>
+              <option>North West</option>
+              <option>Northern Cape</option>
+              <option>Western Cape</option>
+            </select>
+          </label>
+
+          <label>
+            Amount lost (ZAR)
+            <input
+              type="number"
+              name="amountLost"
+              min="0"
+              step="0.01"
+              placeholder="0.00"
+              required
+            />
+          </label>
+
+          <label>
+            Amount recovered (ZAR)
+            <input
+              type="number"
+              name="amountRecovered"
+              min="0"
+              step="0.01"
+              placeholder="0.00"
+            />
+          </label>
+
+          <label>
+            Was this reported to the bank?
+            <select name="reportedToBank" required>
+              <option value="">Choose</option>
+              <option>Yes</option>
+              <option>No</option>
+            </select>
+          </label>
+
+          <label>
+            Was this reported to SAPS?
+            <select name="reportedToSaps" required>
+              <option value="">Choose</option>
+              <option>Yes</option>
+              <option>No</option>
+            </select>
+          </label>
+
+          <label class="full-width">
+            Brief summary (no private account numbers)
+            <textarea
+              name="narrative"
+              rows="4"
+              maxlength="600"
+              placeholder="What happened?"
+              required
+            ></textarea>
+          </label>
+
+          <label class="full-width consent">
+            <input type="checkbox" name="consent" required />
+            I confirm this report is truthful and does not include private account
+            credentials.
+          </label>
+
+          <div class="full-width form-actions">
+            <button type="submit">Add Report</button>
+            <button type="button" id="download-btn" class="secondary">
+              Download CSV
+            </button>
+            <button type="button" id="clear-btn" class="danger">
+              Clear Local Data
+            </button>
+          </div>
+        </form>
+        <p id="form-message" class="message" aria-live="polite"></p>
+      </section>
+
+      <section class="panel" aria-labelledby="stats-title">
+        <h2 id="stats-title">Current Exposure Snapshot</h2>
+        <div class="stat-grid">
+          <article class="stat-card">
+            <p>Total reports</p>
+            <strong id="stat-reports">0</strong>
+          </article>
+          <article class="stat-card">
+            <p>Total lost</p>
+            <strong id="stat-lost">R0</strong>
+          </article>
+          <article class="stat-card">
+            <p>Total recovered</p>
+            <strong id="stat-recovered">R0</strong>
+          </article>
+          <article class="stat-card">
+            <p>Net harm</p>
+            <strong id="stat-net">R0</strong>
+          </article>
+        </div>
+
+        <div class="insight-grid">
+          <article>
+            <h3>By Bank (Net Harm)</h3>
+            <div id="bank-breakdown" class="bars"></div>
+          </article>
+          <article>
+            <h3>Most Common Fraud Types</h3>
+            <ol id="type-breakdown" class="rankings"></ol>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="recent-title">
+        <h2 id="recent-title">Recent Reports</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Bank</th>
+                <th>Type</th>
+                <th>Province</th>
+                <th>Net loss</th>
+                <th>Summary</th>
+              </tr>
+            </thead>
+            <tbody id="report-table"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
