@@ -133,6 +133,11 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 button[type="submit"] {
   background: var(--accent);
   color: #fff;

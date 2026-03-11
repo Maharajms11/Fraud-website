@@ -1,8 +1,7 @@
-const STORAGE_KEY = "fraudWatchReportsV1";
-
 const form = document.getElementById("report-form");
 const messageEl = document.getElementById("form-message");
 const tableEl = document.getElementById("report-table");
+const lastUpdatedEl = document.getElementById("last-updated");
 
 const statReports = document.getElementById("stat-reports");
 const statLost = document.getElementById("stat-lost");
@@ -13,7 +12,6 @@ const bankBreakdownEl = document.getElementById("bank-breakdown");
 const typeBreakdownEl = document.getElementById("type-breakdown");
 
 const downloadBtn = document.getElementById("download-btn");
-const clearBtn = document.getElementById("clear-btn");
 
 const currency = new Intl.NumberFormat("en-ZA", {
   style: "currency",
@@ -21,45 +19,9 @@ const currency = new Intl.NumberFormat("en-ZA", {
   maximumFractionDigits: 2,
 });
 
-function readReports() {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) {
-    return [];
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeReports(reports) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(reports));
-}
-
-function sumBy(reports, selector) {
-  return reports.reduce((total, item) => total + selector(item), 0);
-}
-
-function groupCounts(items, keySelector) {
-  const counts = new Map();
-  for (const item of items) {
-    const key = keySelector(item);
-    counts.set(key, (counts.get(key) || 0) + 1);
-  }
-  return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-}
-
-function groupNetByBank(reports) {
-  const grouped = new Map();
-  for (const report of reports) {
-    const net = report.amountLost - report.amountRecovered;
-    grouped.set(report.bank, (grouped.get(report.bank) || 0) + net);
-  }
-
-  return [...grouped.entries()].sort((a, b) => b[1] - a[1]);
+function setMessage(text, isError = false) {
+  messageEl.textContent = text;
+  messageEl.style.color = isError ? "#b91c1c" : "#0f766e";
 }
 
 function makeCell(text) {
@@ -68,25 +30,17 @@ function makeCell(text) {
   return td;
 }
 
-function renderStats(reports) {
-  const totalLost = sumBy(reports, (r) => r.amountLost);
-  const totalRecovered = sumBy(reports, (r) => r.amountRecovered);
-  const net = totalLost - totalRecovered;
-
-  statReports.textContent = String(reports.length);
-  statLost.textContent = currency.format(totalLost);
-  statRecovered.textContent = currency.format(totalRecovered);
-  statNet.textContent = currency.format(net);
+function renderStats(stats) {
+  statReports.textContent = String(stats.totalReports || 0);
+  statLost.textContent = currency.format(stats.totalLost || 0);
+  statRecovered.textContent = currency.format(stats.totalRecovered || 0);
+  statNet.textContent = currency.format(stats.netHarm || 0);
 }
 
 function renderTable(reports) {
   tableEl.innerHTML = "";
 
-  const sorted = [...reports].sort(
-    (a, b) => new Date(b.incidentDate) - new Date(a.incidentDate),
-  );
-
-  if (!sorted.length) {
+  if (!reports.length) {
     const row = document.createElement("tr");
     const td = document.createElement("td");
     td.colSpan = 6;
@@ -96,7 +50,7 @@ function renderTable(reports) {
     return;
   }
 
-  for (const report of sorted) {
+  for (const report of reports) {
     const row = document.createElement("tr");
     const net = report.amountLost - report.amountRecovered;
 
@@ -111,33 +65,32 @@ function renderTable(reports) {
   }
 }
 
-function renderBankBreakdown(reports) {
+function renderBankBreakdown(bankBreakdown) {
   bankBreakdownEl.innerHTML = "";
-  const grouped = groupNetByBank(reports);
 
-  if (!grouped.length) {
+  if (!bankBreakdown.length) {
     bankBreakdownEl.textContent = "No bank data yet.";
     return;
   }
 
-  const max = grouped[0][1] || 1;
+  const max = bankBreakdown[0].netHarm || 1;
 
-  for (const [bank, net] of grouped) {
+  for (const entry of bankBreakdown) {
     const row = document.createElement("div");
     row.className = "bar-row";
 
     const name = document.createElement("span");
-    name.textContent = bank;
+    name.textContent = entry.bank;
 
     const track = document.createElement("div");
     track.className = "bar-track";
 
     const bar = document.createElement("div");
     bar.className = "bar-value";
-    bar.style.width = `${Math.max((net / max) * 100, 2)}%`;
+    bar.style.width = `${Math.max((entry.netHarm / max) * 100, 2)}%`;
 
     const value = document.createElement("span");
-    value.textContent = currency.format(net);
+    value.textContent = currency.format(entry.netHarm);
 
     track.appendChild(bar);
     row.appendChild(name);
@@ -147,55 +100,68 @@ function renderBankBreakdown(reports) {
   }
 }
 
-function renderTypeBreakdown(reports) {
+function renderTypeBreakdown(typeBreakdown) {
   typeBreakdownEl.innerHTML = "";
 
-  const grouped = groupCounts(reports, (r) => r.fraudType).slice(0, 6);
-
-  if (!grouped.length) {
+  if (!typeBreakdown.length) {
     const li = document.createElement("li");
     li.textContent = "No type data yet.";
     typeBreakdownEl.appendChild(li);
     return;
   }
 
-  for (const [type, count] of grouped) {
+  for (const entry of typeBreakdown.slice(0, 6)) {
     const li = document.createElement("li");
-    li.textContent = `${type} (${count})`;
+    li.textContent = `${entry.fraudType} (${entry.count})`;
     typeBreakdownEl.appendChild(li);
   }
 }
 
-function renderAll() {
-  const reports = readReports();
-  renderStats(reports);
-  renderTable(reports);
-  renderBankBreakdown(reports);
-  renderTypeBreakdown(reports);
+async function loadDashboard() {
+  try {
+    const response = await fetch("/api/dashboard", {
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch dashboard.");
+    }
+
+    const data = await response.json();
+
+    renderStats(data.stats || {});
+    renderTable(Array.isArray(data.reports) ? data.reports : []);
+    renderBankBreakdown(Array.isArray(data.bankBreakdown) ? data.bankBreakdown : []);
+    renderTypeBreakdown(Array.isArray(data.typeBreakdown) ? data.typeBreakdown : []);
+
+    if (data.generatedAt) {
+      const timestamp = new Date(data.generatedAt);
+      lastUpdatedEl.textContent = `Last updated: ${timestamp.toLocaleString()}`;
+      lastUpdatedEl.style.color = "#334155";
+    }
+  } catch (error) {
+    lastUpdatedEl.textContent = "Could not load public data right now.";
+    lastUpdatedEl.style.color = "#b91c1c";
+  }
 }
 
-function formDataToReport(formData) {
+function formDataToPayload(formData) {
   return {
-    id: crypto.randomUUID(),
-    incidentDate: formData.get("incidentDate"),
-    bank: formData.get("bank"),
-    fraudType: formData.get("fraudType"),
-    province: formData.get("province"),
-    amountLost: Number.parseFloat(formData.get("amountLost")) || 0,
-    amountRecovered: Number.parseFloat(formData.get("amountRecovered")) || 0,
-    reportedToBank: formData.get("reportedToBank"),
-    reportedToSaps: formData.get("reportedToSaps"),
-    narrative: (formData.get("narrative") || "").toString().trim(),
-    createdAt: new Date().toISOString(),
+    incidentDate: String(formData.get("incidentDate") || ""),
+    bank: String(formData.get("bank") || ""),
+    fraudType: String(formData.get("fraudType") || ""),
+    province: String(formData.get("province") || ""),
+    amountLost: Number.parseFloat(String(formData.get("amountLost") || "0")),
+    amountRecovered: Number.parseFloat(String(formData.get("amountRecovered") || "0")) || 0,
+    reportedToBank: String(formData.get("reportedToBank") || ""),
+    reportedToSaps: String(formData.get("reportedToSaps") || ""),
+    narrative: String(formData.get("narrative") || ""),
   };
 }
 
-function setMessage(text, isError = false) {
-  messageEl.textContent = text;
-  messageEl.style.color = isError ? "#b91c1c" : "#0f766e";
-}
-
-form.addEventListener("submit", (event) => {
+form.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   if (!form.checkValidity()) {
@@ -204,76 +170,43 @@ form.addEventListener("submit", (event) => {
     return;
   }
 
-  const report = formDataToReport(new FormData(form));
+  const payload = formDataToPayload(new FormData(form));
 
-  if (report.amountRecovered > report.amountLost) {
+  if (payload.amountRecovered > payload.amountLost) {
     setMessage("Recovered amount cannot exceed amount lost.", true);
     return;
   }
 
-  const reports = readReports();
-  reports.push(report);
-  writeReports(reports);
+  const submitBtn = form.querySelector('button[type="submit"]');
+  submitBtn.disabled = true;
 
-  form.reset();
-  setMessage("Report saved locally and added to the exposure dashboard.");
-  renderAll();
+  try {
+    const response = await fetch("/api/reports", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Submission failed.");
+    }
+
+    form.reset();
+    setMessage("Report published to the public dashboard.");
+    await loadDashboard();
+  } catch (error) {
+    setMessage(error.message || "Submission failed.", true);
+  } finally {
+    submitBtn.disabled = false;
+  }
 });
 
 downloadBtn.addEventListener("click", () => {
-  const reports = readReports();
-  if (!reports.length) {
-    setMessage("No data to export yet.", true);
-    return;
-  }
-
-  const headers = [
-    "incidentDate",
-    "bank",
-    "fraudType",
-    "province",
-    "amountLost",
-    "amountRecovered",
-    "reportedToBank",
-    "reportedToSaps",
-    "narrative",
-    "createdAt",
-  ];
-
-  const rows = reports.map((report) =>
-    headers
-      .map((key) => {
-        const value = report[key] ?? "";
-        return `"${String(value).replaceAll('"', '""')}"`;
-      })
-      .join(","),
-  );
-
-  const csv = [headers.join(","), ...rows].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "fraud-watch-sa-reports.csv";
-  link.click();
-
-  URL.revokeObjectURL(url);
-  setMessage("CSV downloaded.");
+  window.location.assign("/api/reports.csv");
 });
 
-clearBtn.addEventListener("click", () => {
-  const shouldClear = window.confirm(
-    "This clears all saved reports from this browser only. Continue?",
-  );
-
-  if (!shouldClear) {
-    return;
-  }
-
-  localStorage.removeItem(STORAGE_KEY);
-  setMessage("Local data cleared.");
-  renderAll();
-});
-
-renderAll();
+loadDashboard();

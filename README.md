@@ -1,20 +1,49 @@
 # Fraud Watch SA
 
-Simple static site for collecting and exposing fraud experiences reported by consumers across South African banks.
+Public reporting website for fraud incidents involving South African banks.
 
-## What this first version does
+## Architecture
 
-- Captures fraud reports via a browser form
-- Stores reports in browser local storage (no backend yet)
-- Shows summary metrics (total reports, loss, recovery, net harm)
-- Shows breakdown by bank and fraud type
-- Lists recent reports in a table
-- Allows CSV export for external analysis
+- Frontend: static HTML/CSS/JS served by Node
+- Backend: Node HTTP server (`server.js`)
+- Storage: server-side JSON datastore at `data/reports.json`
+
+All visitors see the same dashboard data because submissions are stored on the server, not in browser local storage.
+
+## Features
+
+- Public submission form with validation
+- Shared dashboard totals and breakdowns
+- Public CSV export endpoint
+- Recent reports feed
+
+## Security controls in this version
+
+- Input validation for all fields and constrained options
+- Input sanitization for free text
+- Rejection of likely sensitive data in summaries (emails, long number sequences)
+- Request body size limits
+- Rate limiting on submission endpoint (`POST /api/reports`)
+- Security response headers (CSP, frame denial, no-sniff, permissions policy)
 
 ## Run locally
 
-Open `index.html` in a browser, or serve the folder with a simple static server.
+```bash
+cd "/Users/manojmaharaj/Documents/New project/Fraud Website"
+npm start
+```
 
-## Notes
+Then open: `http://localhost:8080`
 
-This version is intentionally lightweight so we can iterate quickly. A next step can add a backend (database + moderation + public aggregate API).
+## API endpoints
+
+- `GET /health`
+- `GET /api/dashboard`
+- `POST /api/reports`
+- `GET /api/reports.csv`
+
+## Important deployment notes
+
+- Run this behind HTTPS in production.
+- Move from JSON file storage to a proper database before high traffic.
+- Add moderation workflow and abuse monitoring if opened broadly to the public.

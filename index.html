@@ -18,8 +18,8 @@
         <p class="eyebrow">Community Fraud Registry</p>
         <h1>Fraud Watch SA</h1>
         <p>
-          Share your experience with South African bank fraud incidents. The goal
-          is to reveal patterns and give consumers visibility into real harm.
+          Share your experience with South African bank fraud incidents. Reports
+          are stored centrally and reflected in a public transparency dashboard.
         </p>
       </header>
 
@@ -123,7 +123,7 @@
           </label>
 
           <label class="full-width">
-            Brief summary (no private account numbers)
+            Brief summary (no private account numbers or email addresses)
             <textarea
               name="narrative"
               rows="4"
@@ -135,17 +135,14 @@
 
           <label class="full-width consent">
             <input type="checkbox" name="consent" required />
-            I confirm this report is truthful and does not include private account
-            credentials.
+            I confirm this report is truthful and excludes private credentials,
+            account numbers, and personal contact data.
           </label>
 
           <div class="full-width form-actions">
-            <button type="submit">Add Report</button>
+            <button type="submit">Publish Report</button>
             <button type="button" id="download-btn" class="secondary">
-              Download CSV
-            </button>
-            <button type="button" id="clear-btn" class="danger">
-              Clear Local Data
+              Download Public CSV
             </button>
           </div>
         </form>
@@ -154,6 +151,8 @@
 
       <section class="panel" aria-labelledby="stats-title">
         <h2 id="stats-title">Current Exposure Snapshot</h2>
+        <p id="last-updated" class="message">Loading public data...</p>
+
         <div class="stat-grid">
           <article class="stat-card">
             <p>Total reports</p>

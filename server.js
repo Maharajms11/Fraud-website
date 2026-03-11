@@ -1,0 +1,474 @@
+const http = require("http");
+const path = require("path");
+const { randomUUID } = require("crypto");
+const { promises: fs } = require("fs");
+
+const HOST = process.env.HOST || "127.0.0.1";
+const PORT = Number.parseInt(process.env.PORT || "8080", 10);
+const ROOT_DIR = __dirname;
+const DATA_DIR = path.join(ROOT_DIR, "data");
+const DATA_FILE = path.join(DATA_DIR, "reports.json");
+const MAX_BODY_BYTES = 20 * 1024;
+const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const RATE_LIMIT_MAX_POSTS = 25;
+
+const postHistoryByIp = new Map();
+let writeQueue = Promise.resolve();
+
+const banks = new Set([
+  "ABSA",
+  "Capitec",
+  "FNB",
+  "Nedbank",
+  "Standard Bank",
+  "TymeBank",
+  "Discovery Bank",
+  "Investec",
+  "African Bank",
+  "Other",
+]);
+
+const fraudTypes = new Set([
+  "Phishing",
+  "Vishing",
+  "SIM swap",
+  "Card cloning",
+  "ATM scam",
+  "App takeover",
+  "Online banking compromise",
+  "Investment scam",
+  "Unauthorized debit order",
+  "Other",
+]);
+
+const provinces = new Set([
+  "Eastern Cape",
+  "Free State",
+  "Gauteng",
+  "KwaZulu-Natal",
+  "Limpopo",
+  "Mpumalanga",
+  "North West",
+  "Northern Cape",
+  "Western Cape",
+]);
+
+const yesNo = new Set(["Yes", "No"]);
+
+const staticFiles = new Map([
+  ["/", { file: "index.html", type: "text/html; charset=utf-8" }],
+  ["/index.html", { file: "index.html", type: "text/html; charset=utf-8" }],
+  ["/styles.css", { file: "styles.css", type: "text/css; charset=utf-8" }],
+  ["/app.js", { file: "app.js", type: "application/javascript; charset=utf-8" }],
+]);
+
+function setSecurityHeaders(res) {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
+  res.setHeader(
+    "Content-Security-Policy",
+    [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self' https://fonts.googleapis.com",
+      "font-src 'self' https://fonts.gstatic.com",
+      "img-src 'self' data:",
+      "connect-src 'self'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+      "object-src 'none'",
+    ].join("; "),
+  );
+}
+
+function sendJson(res, statusCode, body) {
+  setSecurityHeaders(res);
+  res.statusCode = statusCode;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.end(JSON.stringify(body));
+}
+
+function sendText(res, statusCode, body, contentType = "text/plain; charset=utf-8") {
+  setSecurityHeaders(res);
+  res.statusCode = statusCode;
+  res.setHeader("Content-Type", contentType);
+  res.end(body);
+}
+
+function sanitizeText(value, maxLength = 600) {
+  return String(value || "")
+    .replace(/[<>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function parseAmount(value) {
+  const parsed = Number.parseFloat(String(value));
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+  return Number(parsed.toFixed(2));
+}
+
+function hasLikelySensitiveData(text) {
+  const containsLongDigitRuns = /\b\d{8,}\b/.test(text);
+  const containsEmail = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(text);
+  return containsLongDigitRuns || containsEmail;
+}
+
+function validateReport(payload) {
+  if (!payload || typeof payload !== "object") {
+    return { error: "Invalid payload." };
+  }
+
+  const incidentDate = String(payload.incidentDate || "").trim();
+  const bank = String(payload.bank || "").trim();
+  const fraudType = String(payload.fraudType || "").trim();
+  const province = String(payload.province || "").trim();
+  const reportedToBank = String(payload.reportedToBank || "").trim();
+  const reportedToSaps = String(payload.reportedToSaps || "").trim();
+  const narrative = sanitizeText(payload.narrative, 600);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(incidentDate)) {
+    return { error: "Incident date is required." };
+  }
+
+  const parsedDate = new Date(`${incidentDate}T00:00:00Z`);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return { error: "Incident date is invalid." };
+  }
+
+  if (!banks.has(bank)) {
+    return { error: "Bank value is invalid." };
+  }
+
+  if (!fraudTypes.has(fraudType)) {
+    return { error: "Fraud type value is invalid." };
+  }
+
+  if (!provinces.has(province)) {
+    return { error: "Province value is invalid." };
+  }
+
+  if (!yesNo.has(reportedToBank) || !yesNo.has(reportedToSaps)) {
+    return { error: "Reporting status must be Yes or No." };
+  }
+
+  if (narrative.length < 10) {
+    return { error: "Summary is too short." };
+  }
+
+  if (hasLikelySensitiveData(narrative)) {
+    return {
+      error: "Summary appears to include private data. Remove account numbers/emails and try again.",
+    };
+  }
+
+  const amountLost = parseAmount(payload.amountLost);
+  const amountRecovered = parseAmount(payload.amountRecovered ?? 0);
+
+  if (amountLost === null || amountRecovered === null) {
+    return { error: "Amounts must be valid positive numbers." };
+  }
+
+  if (amountRecovered > amountLost) {
+    return { error: "Recovered amount cannot exceed amount lost." };
+  }
+
+  if (amountLost > 500000000 || amountRecovered > 500000000) {
+    return { error: "Amounts exceed allowed limit." };
+  }
+
+  return {
+    value: {
+      id: randomUUID(),
+      incidentDate,
+      bank,
+      fraudType,
+      province,
+      amountLost,
+      amountRecovered,
+      reportedToBank,
+      reportedToSaps,
+      narrative,
+      createdAt: new Date().toISOString(),
+    },
+  };
+}
+
+async function ensureDataFile() {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  try {
+    await fs.access(DATA_FILE);
+  } catch {
+    await fs.writeFile(DATA_FILE, "[]\n", "utf8");
+  }
+}
+
+async function readReports() {
+  await ensureDataFile();
+  try {
+    const raw = await fs.readFile(DATA_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function queueWrite(taskFn) {
+  const next = writeQueue.then(taskFn, taskFn);
+  writeQueue = next.catch(() => {});
+  return next;
+}
+
+async function appendReport(report) {
+  return queueWrite(async () => {
+    const reports = await readReports();
+    reports.push(report);
+    await fs.writeFile(DATA_FILE, JSON.stringify(reports, null, 2) + "\n", "utf8");
+    return report;
+  });
+}
+
+function computeDashboard(reports) {
+  const totals = reports.reduce(
+    (acc, report) => {
+      acc.totalLost += report.amountLost;
+      acc.totalRecovered += report.amountRecovered;
+      return acc;
+    },
+    { totalLost: 0, totalRecovered: 0 },
+  );
+
+  const byBank = new Map();
+  const byType = new Map();
+
+  for (const report of reports) {
+    const net = report.amountLost - report.amountRecovered;
+    byBank.set(report.bank, (byBank.get(report.bank) || 0) + net);
+    byType.set(report.fraudType, (byType.get(report.fraudType) || 0) + 1);
+  }
+
+  const bankBreakdown = [...byBank.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([bank, netHarm]) => ({ bank, netHarm: Number(netHarm.toFixed(2)) }));
+
+  const typeBreakdown = [...byType.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([fraudType, count]) => ({ fraudType, count }));
+
+  const recentReports = [...reports]
+    .sort((a, b) => new Date(b.incidentDate) - new Date(a.incidentDate))
+    .slice(0, 200);
+
+  const netHarm = totals.totalLost - totals.totalRecovered;
+
+  return {
+    stats: {
+      totalReports: reports.length,
+      totalLost: Number(totals.totalLost.toFixed(2)),
+      totalRecovered: Number(totals.totalRecovered.toFixed(2)),
+      netHarm: Number(netHarm.toFixed(2)),
+    },
+    bankBreakdown,
+    typeBreakdown,
+    reports: recentReports,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+function getClientIp(req) {
+  const forwardedFor = req.headers["x-forwarded-for"];
+  if (typeof forwardedFor === "string" && forwardedFor.trim()) {
+    return forwardedFor.split(",")[0].trim();
+  }
+  return req.socket.remoteAddress || "unknown";
+}
+
+function isPostRateLimited(ip) {
+  const now = Date.now();
+  const cutoff = now - RATE_LIMIT_WINDOW_MS;
+  const previous = postHistoryByIp.get(ip) || [];
+  const recent = previous.filter((ts) => ts >= cutoff);
+
+  if (recent.length >= RATE_LIMIT_MAX_POSTS) {
+    postHistoryByIp.set(ip, recent);
+    return true;
+  }
+
+  recent.push(now);
+  postHistoryByIp.set(ip, recent);
+  return false;
+}
+
+function parseJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let totalBytes = 0;
+    let body = "";
+    let tooLarge = false;
+    let settled = false;
+
+    function fail(error) {
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    }
+
+    req.on("data", (chunk) => {
+      if (tooLarge) {
+        return;
+      }
+
+      totalBytes += chunk.length;
+      if (totalBytes > MAX_BODY_BYTES) {
+        tooLarge = true;
+        return;
+      }
+
+      body += chunk.toString("utf8");
+    });
+
+    req.on("end", () => {
+      if (tooLarge) {
+        fail(new Error("Payload too large."));
+        return;
+      }
+
+      try {
+        if (!settled) {
+          settled = true;
+          resolve(body ? JSON.parse(body) : {});
+        }
+      } catch {
+        fail(new Error("Invalid JSON body."));
+      }
+    });
+
+    req.on("error", () => {
+      fail(new Error("Unable to read request body."));
+    });
+  });
+}
+
+function toCsv(reports) {
+  const headers = [
+    "incidentDate",
+    "bank",
+    "fraudType",
+    "province",
+    "amountLost",
+    "amountRecovered",
+    "reportedToBank",
+    "reportedToSaps",
+    "narrative",
+    "createdAt",
+  ];
+
+  const rows = reports.map((report) =>
+    headers
+      .map((key) => `"${String(report[key] ?? "").replaceAll('"', '""')}"`)
+      .join(","),
+  );
+
+  return [headers.join(","), ...rows].join("\n");
+}
+
+async function serveStatic(reqPath, res) {
+  const staticAsset = staticFiles.get(reqPath);
+  if (!staticAsset) {
+    sendText(res, 404, "Not Found");
+    return;
+  }
+
+  const filePath = path.join(ROOT_DIR, staticAsset.file);
+  try {
+    const content = await fs.readFile(filePath);
+    setSecurityHeaders(res);
+    res.statusCode = 200;
+    res.setHeader("Content-Type", staticAsset.type);
+    res.end(content);
+  } catch {
+    sendText(res, 500, "Failed to load static file.");
+  }
+}
+
+async function handleRequest(req, res) {
+  const requestUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  const reqPath = requestUrl.pathname;
+
+  if (req.method === "GET" && reqPath === "/health") {
+    sendJson(res, 200, { ok: true, service: "fraud-watch-sa" });
+    return;
+  }
+
+  if (req.method === "GET" && reqPath === "/api/dashboard") {
+    const reports = await readReports();
+    sendJson(res, 200, computeDashboard(reports));
+    return;
+  }
+
+  if (req.method === "GET" && reqPath === "/api/reports.csv") {
+    const reports = await readReports();
+    const csv = toCsv(reports);
+
+    setSecurityHeaders(res);
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="fraud-watch-sa-reports.csv"');
+    res.end(csv);
+    return;
+  }
+
+  if (req.method === "POST" && reqPath === "/api/reports") {
+    const clientIp = getClientIp(req);
+    if (isPostRateLimited(clientIp)) {
+      sendJson(res, 429, {
+        error: "Too many submissions from this address. Please try again later.",
+      });
+      return;
+    }
+
+    let payload;
+    try {
+      payload = await parseJsonBody(req);
+    } catch (error) {
+      const isTooLarge = String(error.message).includes("too large");
+      sendJson(res, isTooLarge ? 413 : 400, { error: error.message });
+      return;
+    }
+
+    const validation = validateReport(payload);
+    if (validation.error) {
+      sendJson(res, 400, { error: validation.error });
+      return;
+    }
+
+    const saved = await appendReport(validation.value);
+    sendJson(res, 201, { report: saved });
+    return;
+  }
+
+  if (req.method === "GET") {
+    await serveStatic(reqPath, res);
+    return;
+  }
+
+  sendJson(res, 405, { error: "Method not allowed." });
+}
+
+const server = http.createServer((req, res) => {
+  handleRequest(req, res).catch((error) => {
+    console.error("Unhandled server error:", error);
+    sendJson(res, 500, { error: "Internal server error." });
+  });
+});
+
+server.listen(PORT, HOST, () => {
+  console.log(`Fraud Watch SA running on http://${HOST}:${PORT}`);
+});
