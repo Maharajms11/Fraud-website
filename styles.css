@@ -197,6 +197,32 @@ textarea {
   grid-template-columns: 1fr;
 }
 
+.privacy-card {
+  margin: 0;
+  padding: 0.8rem;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 61, 165, 0.22);
+  background: linear-gradient(180deg, rgba(0, 61, 165, 0.05) 0%, rgba(255, 255, 255, 0.8) 100%);
+}
+
+.privacy-card h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.privacy-card p {
+  margin: 0.35rem 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.audit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
 .consent {
   grid-template-columns: auto 1fr;
   align-items: start;
@@ -384,7 +410,8 @@ tbody tr:nth-child(even) td {
   .form-grid,
   .stat-grid,
   .insight-grid,
-  .linked-fields {
+  .linked-fields,
+  .audit-grid {
     grid-template-columns: 1fr;
   }
 

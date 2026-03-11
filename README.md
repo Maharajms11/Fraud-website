@@ -13,6 +13,8 @@ All visitors see the same dashboard data because submissions are stored on the s
 ## Features
 
 - Public submission form with validation
+- Private audit-contact capture (name + contact details, non-public)
+- Private technical audit metadata capture (hashed IP + user-agent, non-public)
 - Shared dashboard totals and breakdowns
 - Public CSV export endpoint
 - Recent reports feed
@@ -22,6 +24,9 @@ All visitors see the same dashboard data because submissions are stored on the s
 - Input validation for all fields and constrained options
 - Input sanitization for free text
 - Rejection of likely sensitive data in summaries (emails, long number sequences)
+- POPIA consent requirement before submission
+- Personal audit fields excluded from public dashboard and public CSV outputs
+- IP stored as HMAC hash (`IP_HASH_SECRET`) for audit and duplicate analysis
 - Request body size limits
 - Rate limiting on submission endpoint (`POST /api/reports`)
 - Security response headers (CSP, frame denial, no-sniff, permissions policy)
@@ -41,6 +46,8 @@ Then open: `http://localhost:8080`
 - `GET /api/dashboard`
 - `POST /api/reports`
 - `GET /api/reports.csv`
+- `GET /api/audit/reports` (requires `AUDIT_TOKEN`)
+- `GET /api/audit/reports.csv` (requires `AUDIT_TOKEN`)
 
 ## Important deployment notes
 
@@ -63,5 +70,7 @@ Render settings used:
 - `Start Command`: `npm start`
 - `Health Check`: `/health`
 - `HOST=0.0.0.0` (required for cloud runtime)
+- Optional for private audit export: `AUDIT_TOKEN=<strong-secret>`
+- Recommended for private IP hashing: `IP_HASH_SECRET=<strong-separate-secret>`
 
 Note: current storage is JSON file based and may reset on instance rebuild/restart. For reliable persistence, move to a managed database (SQLite on persistent disk, PostgreSQL, etc.).

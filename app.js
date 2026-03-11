@@ -37,6 +37,10 @@ function makeCell(text) {
 }
 
 function formatCaseField(status, caseNumber) {
+  if (!status || status === "Unknown") {
+    return "Not provided";
+  }
+
   if (status !== "Yes") {
     return "No";
   }
@@ -189,6 +193,10 @@ function formDataToPayload(formData) {
     sapsCaseNumber: String(formData.get("sapsCaseNumber") || "").trim(),
     hasServedInCourt: String(formData.get("hasServedInCourt") || ""),
     courtCaseNumber: String(formData.get("courtCaseNumber") || "").trim(),
+    reporterName: String(formData.get("reporterName") || "").trim(),
+    reporterEmail: String(formData.get("reporterEmail") || "").trim(),
+    reporterPhone: String(formData.get("reporterPhone") || "").trim(),
+    consentPopia: Boolean(formData.get("consentPopia")),
     narrative: String(formData.get("narrative") || ""),
   };
 }
@@ -206,6 +214,11 @@ form.addEventListener("submit", async (event) => {
 
   if (payload.amountRecovered > payload.amountLost) {
     setMessage("Recovered amount cannot exceed amount lost.", true);
+    return;
+  }
+
+  if (!payload.reporterEmail && !payload.reporterPhone) {
+    setMessage("Provide at least one private contact detail: email or mobile number.", true);
     return;
   }
 

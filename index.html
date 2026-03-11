@@ -118,8 +118,8 @@
 
           <label>
             Was this reported to the bank?
-            <select name="reportedToBank" required>
-              <option value="">Choose</option>
+            <select name="reportedToBank">
+              <option value="">Not provided</option>
               <option>Yes</option>
               <option>No</option>
             </select>
@@ -128,8 +128,8 @@
           <div class="full-width linked-fields">
             <label>
               Was this reported to SAPS?
-              <select name="reportedToSaps" required>
-                <option value="">Choose</option>
+              <select name="reportedToSaps">
+                <option value="">Not provided</option>
                 <option>Yes</option>
                 <option>No</option>
               </select>
@@ -149,8 +149,8 @@
           <div class="full-width linked-fields">
             <label>
               Has this matter served in court?
-              <select name="hasServedInCourt" required>
-                <option value="">Choose</option>
+              <select name="hasServedInCourt">
+                <option value="">Not provided</option>
                 <option>Yes</option>
                 <option>No</option>
               </select>
@@ -167,6 +167,50 @@
             </label>
           </div>
 
+          <section class="full-width privacy-card" aria-labelledby="privacy-title">
+            <h3 id="privacy-title">Private Audit Details (Not Public)</h3>
+            <p>
+              These details are collected for credibility checks and audit
+              follow-up only. Technical metadata (hashed IP and browser
+              user-agent) is also logged for abuse prevention and audit
+              integrity. None of this is shown on the public dashboard or
+              public CSV export.
+            </p>
+
+            <div class="audit-grid">
+              <label>
+                Full name (private)
+                <input
+                  type="text"
+                  name="reporterName"
+                  maxlength="120"
+                  placeholder="Your full name"
+                  required
+                />
+              </label>
+
+              <label>
+                Email address (private)
+                <input
+                  type="email"
+                  name="reporterEmail"
+                  maxlength="160"
+                  placeholder="name@example.com"
+                />
+              </label>
+
+              <label>
+                Mobile number (private)
+                <input
+                  type="tel"
+                  name="reporterPhone"
+                  maxlength="30"
+                  placeholder="+27..."
+                />
+              </label>
+            </div>
+          </section>
+
           <label class="full-width">
             Brief summary (no private account numbers or email addresses)
             <textarea
@@ -176,6 +220,14 @@
               placeholder="What happened?"
               required
             ></textarea>
+          </label>
+
+          <label class="full-width consent">
+            <input type="checkbox" name="consentPopia" required />
+            POPIA notice: I consent to this platform processing my personal
+            details and limited technical metadata (hashed IP and user-agent)
+            for fraud-audit purposes, storing them securely, and not publishing
+            them in public outputs.
           </label>
 
           <label class="full-width consent">

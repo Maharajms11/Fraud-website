@@ -1,6 +1,6 @@
 const http = require("http");
 const path = require("path");
-const { randomUUID } = require("crypto");
+const { createHmac, randomUUID } = require("crypto");
 const { promises: fs } = require("fs");
 
 const HOST = process.env.HOST || "127.0.0.1";
@@ -8,6 +8,8 @@ const PORT = Number.parseInt(process.env.PORT || "8080", 10);
 const ROOT_DIR = __dirname;
 const DATA_FILE = process.env.DATA_FILE || path.join(ROOT_DIR, "data", "reports.json");
 const DATA_DIR = path.dirname(DATA_FILE);
+const AUDIT_TOKEN = process.env.AUDIT_TOKEN || "";
+const IP_HASH_SECRET = process.env.IP_HASH_SECRET || process.env.AUDIT_TOKEN || "";
 const MAX_BODY_BYTES = 20 * 1024;
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const RATE_LIMIT_MAX_POSTS = 25;
@@ -53,7 +55,7 @@ const provinces = new Set([
   "Western Cape",
 ]);
 
-const yesNo = new Set(["Yes", "No"]);
+const statusValues = new Set(["Yes", "No", "Unknown"]);
 
 const staticFiles = new Map([
   ["/", { file: "index.html", type: "text/html; charset=utf-8" }],
@@ -118,6 +120,42 @@ function isValidCaseRef(value) {
   return /^[A-Za-z0-9][A-Za-z0-9/.\-\s]*$/.test(value);
 }
 
+function normalizeStatus(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return "Unknown";
+  }
+  return trimmed;
+}
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase().slice(0, 160);
+}
+
+function normalizePhone(value) {
+  return String(value || "")
+    .replace(/[^\d+\s()-]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 30);
+}
+
+function isValidEmail(value) {
+  return /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(value);
+}
+
+function isValidPhone(value) {
+  return /^[+]?[\d\s()-]{7,30}$/.test(value);
+}
+
+function hashIp(ipAddress) {
+  if (!IP_HASH_SECRET || !ipAddress) {
+    return "";
+  }
+
+  return createHmac("sha256", IP_HASH_SECRET).update(ipAddress).digest("hex");
+}
+
 function parseAmount(value) {
   const parsed = Number.parseFloat(String(value));
   if (!Number.isFinite(parsed) || parsed < 0) {
@@ -132,7 +170,7 @@ function hasLikelySensitiveData(text) {
   return containsLongDigitRuns || containsEmail;
 }
 
-function validateReport(payload) {
+function validateReport(payload, auditContext = {}) {
   if (!payload || typeof payload !== "object") {
     return { error: "Invalid payload." };
   }
@@ -141,12 +179,18 @@ function validateReport(payload) {
   const bank = String(payload.bank || "").trim();
   const fraudType = String(payload.fraudType || "").trim();
   const province = String(payload.province || "").trim();
-  const reportedToBank = String(payload.reportedToBank || "").trim();
-  const reportedToSaps = String(payload.reportedToSaps || "").trim();
-  const hasServedInCourt = String(payload.hasServedInCourt || "").trim();
+  const reportedToBank = normalizeStatus(payload.reportedToBank);
+  const reportedToSaps = normalizeStatus(payload.reportedToSaps);
+  const hasServedInCourt = normalizeStatus(payload.hasServedInCourt);
   const sapsCaseNumberInput = sanitizeCaseRef(payload.sapsCaseNumber, 80);
   const courtCaseNumberInput = sanitizeCaseRef(payload.courtCaseNumber, 80);
+  const reporterName = sanitizeText(payload.reporterName, 120);
+  const reporterEmail = normalizeEmail(payload.reporterEmail);
+  const reporterPhone = normalizePhone(payload.reporterPhone);
+  const consentPopia = Boolean(payload.consentPopia);
   const narrative = sanitizeText(payload.narrative, 600);
+  const ipHash = String(auditContext.ipHash || "");
+  const submittedUserAgent = sanitizeText(auditContext.userAgent, 300);
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(incidentDate)) {
     return { error: "Incident date is required." };
@@ -169,8 +213,12 @@ function validateReport(payload) {
     return { error: "Province value is invalid." };
   }
 
-  if (!yesNo.has(reportedToBank) || !yesNo.has(reportedToSaps) || !yesNo.has(hasServedInCourt)) {
-    return { error: "Reporting status must be Yes or No." };
+  if (
+    !statusValues.has(reportedToBank) ||
+    !statusValues.has(reportedToSaps) ||
+    !statusValues.has(hasServedInCourt)
+  ) {
+    return { error: "Reporting status must be Yes, No, or left blank." };
   }
 
   if (sapsCaseNumberInput && !isValidCaseRef(sapsCaseNumberInput)) {
@@ -183,6 +231,26 @@ function validateReport(payload) {
 
   if (narrative.length < 10) {
     return { error: "Summary is too short." };
+  }
+
+  if (reporterName.length < 2) {
+    return { error: "Private full name is required for audit purposes." };
+  }
+
+  if (!reporterEmail && !reporterPhone) {
+    return { error: "Provide at least one private contact detail (email or mobile)." };
+  }
+
+  if (reporterEmail && !isValidEmail(reporterEmail)) {
+    return { error: "Private email address is invalid." };
+  }
+
+  if (reporterPhone && !isValidPhone(reporterPhone)) {
+    return { error: "Private mobile number is invalid." };
+  }
+
+  if (!consentPopia) {
+    return { error: "POPIA consent is required." };
   }
 
   if (hasLikelySensitiveData(narrative)) {
@@ -223,6 +291,14 @@ function validateReport(payload) {
       sapsCaseNumber,
       hasServedInCourt,
       courtCaseNumber,
+      audit: {
+        reporterName,
+        reporterEmail,
+        reporterPhone,
+        consentPopiaAt: new Date().toISOString(),
+        ipHash,
+        submittedUserAgent,
+      },
       narrative,
       createdAt: new Date().toISOString(),
     },
@@ -264,6 +340,25 @@ async function appendReport(report) {
   });
 }
 
+function toPublicReport(report) {
+  return {
+    id: report.id,
+    incidentDate: report.incidentDate,
+    bank: report.bank,
+    fraudType: report.fraudType,
+    province: report.province,
+    amountLost: report.amountLost,
+    amountRecovered: report.amountRecovered,
+    reportedToBank: report.reportedToBank,
+    reportedToSaps: report.reportedToSaps,
+    sapsCaseNumber: report.sapsCaseNumber,
+    hasServedInCourt: report.hasServedInCourt,
+    courtCaseNumber: report.courtCaseNumber,
+    narrative: report.narrative,
+    createdAt: report.createdAt,
+  };
+}
+
 function computeDashboard(reports) {
   const totals = reports.reduce(
     (acc, report) => {
@@ -293,7 +388,8 @@ function computeDashboard(reports) {
 
   const recentReports = [...reports]
     .sort((a, b) => new Date(b.incidentDate) - new Date(a.incidentDate))
-    .slice(0, 200);
+    .slice(0, 200)
+    .map(toPublicReport);
 
   const netHarm = totals.totalLost - totals.totalRecovered;
 
@@ -411,6 +507,69 @@ function toCsv(reports) {
   return [headers.join(","), ...rows].join("\n");
 }
 
+function toAuditCsv(reports) {
+  const headers = [
+    "incidentDate",
+    "bank",
+    "fraudType",
+    "province",
+    "amountLost",
+    "amountRecovered",
+    "reportedToBank",
+    "reportedToSaps",
+    "sapsCaseNumber",
+    "hasServedInCourt",
+    "courtCaseNumber",
+    "narrative",
+    "createdAt",
+    "reporterName",
+    "reporterEmail",
+    "reporterPhone",
+    "consentPopiaAt",
+    "ipHash",
+    "submittedUserAgent",
+  ];
+
+  const rows = reports.map((report) => {
+    const audit = report.audit || {};
+    const values = {
+      ...report,
+      reporterName: audit.reporterName || "",
+      reporterEmail: audit.reporterEmail || "",
+      reporterPhone: audit.reporterPhone || "",
+      consentPopiaAt: audit.consentPopiaAt || "",
+      ipHash: audit.ipHash || "",
+      submittedUserAgent: audit.submittedUserAgent || "",
+    };
+
+    return headers
+      .map((key) => `"${String(values[key] ?? "").replaceAll('"', '""')}"`)
+      .join(",");
+  });
+
+  return [headers.join(","), ...rows].join("\n");
+}
+
+function authorizeAuditRequest(req, requestUrl) {
+  if (!AUDIT_TOKEN) {
+    return {
+      ok: false,
+      status: 503,
+      error: "Audit endpoint is disabled. Set AUDIT_TOKEN on the server.",
+    };
+  }
+
+  const tokenFromHeader = req.headers["x-audit-token"];
+  const tokenFromQuery = requestUrl.searchParams.get("token");
+  const providedToken = String(tokenFromHeader || tokenFromQuery || "");
+
+  if (!providedToken || providedToken !== AUDIT_TOKEN) {
+    return { ok: false, status: 401, error: "Unauthorized audit access." };
+  }
+
+  return { ok: true };
+}
+
 async function serveStatic(reqPath, res) {
   const staticAsset = staticFiles.get(reqPath);
   if (!staticAsset) {
@@ -445,6 +604,36 @@ async function handleRequest(req, res) {
     return;
   }
 
+  if (req.method === "GET" && reqPath === "/api/audit/reports") {
+    const auth = authorizeAuditRequest(req, requestUrl);
+    if (!auth.ok) {
+      sendJson(res, auth.status, { error: auth.error });
+      return;
+    }
+
+    const reports = await readReports();
+    sendJson(res, 200, { reports, total: reports.length });
+    return;
+  }
+
+  if (req.method === "GET" && reqPath === "/api/audit/reports.csv") {
+    const auth = authorizeAuditRequest(req, requestUrl);
+    if (!auth.ok) {
+      sendJson(res, auth.status, { error: auth.error });
+      return;
+    }
+
+    const reports = await readReports();
+    const csv = toAuditCsv(reports);
+
+    setSecurityHeaders(res);
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="fraud-watch-sa-audit-reports.csv"');
+    res.end(csv);
+    return;
+  }
+
   if (req.method === "GET" && reqPath === "/api/reports.csv") {
     const reports = await readReports();
     const csv = toCsv(reports);
@@ -475,7 +664,10 @@ async function handleRequest(req, res) {
       return;
     }
 
-    const validation = validateReport(payload);
+    const validation = validateReport(payload, {
+      ipHash: hashIp(clientIp),
+      userAgent: req.headers["user-agent"],
+    });
     if (validation.error) {
       sendJson(res, 400, { error: validation.error });
       return;
