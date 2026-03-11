@@ -186,6 +186,17 @@ textarea {
   grid-column: 1 / -1;
 }
 
+.linked-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+  align-items: end;
+}
+
+.linked-fields:has(> label[hidden]) {
+  grid-template-columns: 1fr;
+}
+
 .consent {
   grid-template-columns: auto 1fr;
   align-items: start;
@@ -372,7 +383,8 @@ tbody tr:nth-child(even) td {
 @media (max-width: 900px) {
   .form-grid,
   .stat-grid,
-  .insight-grid {
+  .insight-grid,
+  .linked-fields {
     grid-template-columns: 1fr;
   }
 
